@@ -63,3 +63,37 @@ Spring Boot는 독립적으로 실행할 수 있는 Spring 애플리케이션을
 => 다형성만으로는 모든 원칙을 지킬 수 없다   
 -> 스프링의 DI 컨테이너 이용    
 -> 클라이언트의 코드 변경 없이 기능 확장 가능
+
+## 비즈니스 요구사항과 설계
+도메인 협력 관계도
+![캡처](https://user-images.githubusercontent.com/68456385/126960745-d4e05bab-69ff-4262-8990-1ac3711e6625.PNG)
+
+클래스 다이어그램
+![캡처](https://user-images.githubusercontent.com/68456385/126960860-8d08360d-cd7c-45f0-8144-1a0015471878.PNG)
+
+객체 다이어그램
+![캡처](https://user-images.githubusercontent.com/68456385/126960942-92508a79-9951-4577-8908-107391c4160e.PNG)
+
+역할과 구현의 분리, 단일 책임 원칙을 잘 지킨 설계
+![캡처](https://user-images.githubusercontent.com/68456385/127164269-a4e2c28b-a0be-48bf-a996-a48c314dae72.PNG)
+
+```java
+public class MemberServiceImpl implements MemberService {
+
+   private final MemberRepository memberRepository = new MemoryMemberRepository();
+   
+}
+```
+구현 클래스를 변경하려면 클라이언트(service) 코드를 변경해야 함   
+클라이언트(service)가 인터페이스뿐만 아니라 구현 클래스에도 의존   
+=> OCP, DIP 위반   
+-> 인터페이스에만 의존하도록 해볼까?
+```java
+public class MemberServiceImpl implements MemberService {
+
+   private MemberRepository memberRepository;
+   
+}
+```
+=> 구현체가 없기 때문에 실행 불가   
+-> 다른 누군가가 클라이언트에 구현 객체를 대신 생성하고 주입해주어야 함

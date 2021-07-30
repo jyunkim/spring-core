@@ -245,8 +245,73 @@ public class OrderApp {
 ```
 - 기존에는 AppConfig 객체를 직접 생성하고 DI를 했지만, 이제부터는 스프링 컨테이너를 통해 DI 수행   
 - ApplicationContext = 스프링 컨테이너   
-- 스프링 컨테이너는 @Configuration이 붙은 클래스를 설정(구성) 정보로 사용   
-- 여기서 @Bean이라 적힌 메서드를 모두 호출해서 반환된 객체를 스프링 컨테이너에 등록   
+- 스프링 컨테이너는 @Configuration이 붙은 클래스를 구성 정보로 사용   
+- 구성 정보에서 @Bean이라 적힌 메서드를 모두 호출해서 반환된 객체를 스프링 컨테이너에 등록   
 - 이렇게 스프링 컨테이너에 등록된 객체를 스프링 빈이라 함   
-- 스프링 빈은 @Bean이 붙은 메서드의 명을 스프링 빈의 이름으로 사용   
+- 스프링 빈은 기본값으로 @Bean이 붙은 메서드의 명을 스프링 빈의 이름으로 사용   
 - 스프링 빈은 getBean 메서드를 사용해서 찾을 수 있음
+
+## 4. 스프링 컨테이너와 스프링 빈
+### 스프링 컨테이너 생성
+ApplicationContext = 스프링 컨테이너(인터페이스)      
+스프링 컨테이너 구현체는 어노테이션 기반의 자바 설정 클래스, XML 등으로 만들 수 있음
+![image](https://user-images.githubusercontent.com/68456385/127629145-1e8673ae-2c22-4656-b237-4d1b9bb88602.png)
+
+스프링 컨테이너 생성 과정
+1. 스프링 컨테이너 생성
+![image](https://user-images.githubusercontent.com/68456385/127610656-55127281-ae1c-43ee-b8ce-05e8bd7d94ae.png)
+
+
+2. 스프링 빈 등록
+![image](https://user-images.githubusercontent.com/68456385/127610876-4e4bef2f-6124-4784-8de5-c4a5699f60e7.png)
+   빈 이름은 항상 다른 이름을 부여해야 함   
+   같은 이름을 부여하면 다른 빈이 무시되거나, 기존 빈을 덮어버리거나 설정에 따라 오류가 발생   
+   빈 이름 직접 부여 가능 - @Bean(name="memberService")
+   
+
+3. 스프링 빈 의존관계 설정
+   ![image](https://user-images.githubusercontent.com/68456385/127611759-16de1fa1-9641-49d9-8ec0-897d9711c27e.png)
+   스프링 컨테이너는 설정 정보를 참고해서 의존관계를 주입(DI)   
+   원래 스프링은 빈을 생성하고, 의존관계를 주입하는 단계가 나누어져 있음   
+   그런데 이렇게 자바 코드로 스프링 빈을 등록하면, 생성자를 호출하면서 의존관계 주입도 한번에 처리됨
+   
+### 스프링 빈 조회
+스프링 컨테이너에서 스프링 빈을 찾는 가장 기본적인 조회 방법
+- ac.getBean(빈이름, 타입)
+- ac.getBean(타입)   
+  타입으로 조회시 같은 타입의 스프링 빈이 둘 이상이면 오류 발생
+
+부모 타입으로 조회하면, 자식 타입도 함께 조회된다   
+-> Object 타입으로 조회하면, 모든 스프링 빈을 조회
+
+### BeanFactory와 ApplicationContext
+![image](https://user-images.githubusercontent.com/68456385/127628131-ba2746c4-7d0e-423b-bbd6-7d5eed8dc03d.png)
+
+**BeanFactory**   
+스프링 컨테이너의 최상위 인터페이스   
+스프링 빈을 관리하고 조회하는 역할을 담당   
+지금까지 우리가 사용했던 대부분의 기능은 BeanFactory가 제공
+
+**ApplicatonContext 부가 기능**
+![image](https://user-images.githubusercontent.com/68456385/127628340-842f4b9e-f332-45b9-9b4a-97015e154929.png)
+- 메시지소스를 활용한 국제화 기능   
+-> 들어온 국가의 언어로 출력 
+- 환경변수   
+-> 로컬, 개발, 운영 환경 등으로 구분해서 처리
+- 애플리케이션 이벤트   
+-> 이벤트를 발행하고 구독하는 모델을 편리하게 지원
+- 편리한 리소스 조회   
+-> 파일, 클래스패스, 외부 등에서 리소스를 편리하게 조회
+  
+### 스프링 빈 설정 메타 정보
+스프링은 어떻게 이런 다양한 설정 형식을 지원하는 것일까?   
+-> BeanDefinition 추상화 이용   
+-> 스프링 컨테이너는 BeanDefinition에만 의존
+![image](https://user-images.githubusercontent.com/68456385/127630119-84df755c-bd81-4cb1-b1a9-b5bf64f51192.png)
+
+BeanDefinition = 빈 설정 메타 정보   
+빈 하나당 하나의 메타 정보 생성   
+스프링 컨테이너는 이 메타 정보를 기반으로 스프링 빈 생성
+
+AnnotationConfigApplicationContext가 AnnotatedBeanDefinitionReader를 사용해서
+AppConfig.class를 읽고 BeanDefinition 생성

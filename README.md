@@ -315,3 +315,120 @@ BeanDefinition = 빈 설정 메타 정보
 
 AnnotationConfigApplicationContext가 AnnotatedBeanDefinitionReader를 사용해서
 AppConfig.class를 읽고 BeanDefinition 생성
+
+## 5. 싱글톤 컨테이너
+웹 애플리케이션은 보통 여러 고객이 동시에 요청을 함   
+스프링을 사용하지 않은 DI 컨테이너는 요청이 올 때마다 새로운 객체를 생성
+-> 메모리 낭비
+
+### 싱글톤 패턴
+객체 인스턴스가 JVM 내 하나만 존재하도록 하는 패턴   
+싱글톤 패턴을 적용하면 고객의 요청이 올 때 마다 객체를 생성하는 것이 아니라, 이미 만들어진 객체를 공유해서 효율적으로 사용할 수 있음   
+But, 코드가 많이 들어가고, 의존관계상 클라이언트가 구체 클래스에 의존하기 때문에 DIP 위반   
+내부 속성을 변경하거나 초기화 하기 어렵고, private 생성자로 자식 클래스를 만들기 어려움 -> 유연성이 떨어짐
+
+### 싱글톤 컨테이너
+스프링 컨테이너는 싱글톤 패턴의 문제점을 해결하면서, 객체 인스턴스(스프링 빈)를 싱글톤으로 관리함
+스프링 컨테이너는 싱글톤 컨테이너 역할을 하며, 이렇게 싱글톤 객체를 생성하고 관리하는 기능을 싱글톤 레지스트리라 함
+
+![image](https://user-images.githubusercontent.com/68456385/128148853-a75fe714-64a8-40cb-b8e0-1bc56a901384.png)
+
+### 싱글톤 방식의 주의점
+싱글톤 방식은 여러 클라이언트가 하나의 같은 객체 인스턴스를 공유하기 때문에, 싱글톤 객체는 상태를 유지(stateful)하게 설계하면 안됨
+
+-> 무상태(stateless)로 설계해야 함
+- 특정 클라이언트에 의존적인 필드가 있으면 안된다.
+- 특정 클라이언트가 값을 변경할 수 있는 필드가 있으면 안된다.
+- 가급적 읽기만 가능해야 한다.
+- 필드 대신에 자바에서 공유되지 않는, 지역변수, 파라미터, ThreadLocal 등을 사용해야 한다.
+
+스프링 빈의 필드에 공유 값을 설정하면 매우 큰 장애 발생 가능
+
+```java
+public class StatefulService {
+
+    // 상태를 유지하는 필드
+    private int price;
+
+    public void order(String name, int price) {
+        System.out.println("name = " + name + "price = " + price);
+        this.price = price; // 문제 발생
+    }
+
+    public int getPrice() {
+        return price;
+    }
+}
+```
+
+```java
+public class StatelessService {
+
+    // 공유 필드 제거
+    public int order(String name, int price) {
+        System.out.println("name = " + name + "price = " + price);
+        return price;
+    }
+}
+```
+
+### @Configuration
+```java
+@Configuration
+public class AppConfig {
+    
+    @Bean
+    public MemberService memberService() {
+        return new MemberServiceImpl(memberRepository());
+    }
+
+    @Bean
+    public MemberRepository memberRepository() {
+        return new MemoryMemberRepository();
+    }
+
+    @Bean
+    public OrderService orderService() {
+        return new OrderServiceImpl(memberRepository(), discountPolicy());
+    }
+
+    @Bean
+    public DiscountPolicy discountPolicy() {
+        return new FixedDiscountPolicy();
+    }
+}
+```
+memberService, orderService 빈 생성 시 MemoryMemberRepository 객체가 각각 생성되기 때문에 싱글톤이 깨지는 것처럼 보임   
+하지만 확인해보면 memberRepository 인스턴스는 모두 같은 인스턴스가 공유되어 사용됨   
+어떻게 된 것일까?
+
+@Bean 호출 로그 확인   
+로직상으론 memberRepository() 메서드가 여러번 호출되어야 함   
+-> But, 로그를 확인해보면 한번만 호출됨
+
+AppConfig 스프링 빈을 조회해서 클래스 정보를 출력해보면 다음과 같이 나온다
+(AnnotationConfigApplicationContext에 파라미터로 넘긴 값은 스프링 빈으로 등록되기 때문에 AppConfig도 스프링 빈이 됨)
+> class hello.core.AppConfig$$EnhancerBySpringCGLIB$$bd479d70
+
+만약 순수한 클래스라면 다음과 같이 출력되어야 함
+> class hello.core.AppConfig
+
+-> 스프링이 CGLIB라는 바이트코드 조작 라이브러리를 사용해서 AppConfig 클래스를 상속받은 임의의 다른 클래스를 만들고, 
+그 클래스를 스프링 빈으로 등록한 것   
+그리고 그 클래스가 싱글톤이 되도록 보장해줌
+![image](https://user-images.githubusercontent.com/68456385/128162799-19a990cf-5b7c-417b-9c46-61079429d24e.png)
+
+AppConfig@CGLIB 예상 코드
+![image](https://user-images.githubusercontent.com/68456385/128163345-e1b76507-1c94-48dc-b162-eaf5930d1148.png)
+=> @Bean이 붙은 메서드마다 이미 스프링 빈이 존재하면 존재하는 빈을 반환하고,
+스프링 빈이 없으면 생성해서 스프링 빈으로 등록하고 반환하는 코드가 동적으로 만들어짐
+
+@Configuration을 적용하지 않으면 어떻게 될까?   
+-> AppConfig가 CGLIB 기술 없이 순수한 AppConfig로 스프링 빈에 등록된 것을 확인할 수 있음
+> bean = class hello.core.AppConfig
+
+@Bean 호출 로그를 찍어보면, 한 메서드가 여러번 실행되는 것을 확인할 수 있음   
+-> 객체가 여러 개 생성됨   
+-> 싱글톤 패턴이 깨짐
+
+=> @Configuration을 사용하지 않고 @Bean만 사용해도 스프링 빈으로 등록되지만, 싱글톤을 보장하지 않는다.

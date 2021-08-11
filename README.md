@@ -432,3 +432,103 @@ AppConfig@CGLIB 예상 코드
 -> 싱글톤 패턴이 깨짐
 
 => @Configuration을 사용하지 않고 @Bean만 사용해도 스프링 빈으로 등록되지만, 싱글톤을 보장하지 않는다.
+
+## 6. 컴포넌트 스캔
+지금까지의 @Bean을 통한 스프링 빈 등록 방식은 개수가 많아질수록 복잡하고 번거로워짐   
+스프링은 설정 정보가 없어도 자동으로 스프링 빈을 등록하는 컴포넌트 스캔, 
+의존관계를 자동으로 주입하는 @Autowired 기능도 제공
+
+### 컴포넌트 스캔
+@Component 어노테이션이 붙은 클래스를 스캔해서 스프링 빈으로 등록   
+@Configuration도 내부적으로 @Component 어노테이션이 붙어있기 때문에 자동으로 등록됨   
+\* 어노테이션에 다른 어노테이션이 붙는 것은 자바 언어 문법이 아니라 스프링에서 지원하는 기능
+
+스프링 빈의 이름은 클래스명을 사용하되 맨 앞글자만 소문자를 사용   
+만약 스프링 빈의 이름을 직접 지정하고 싶으면 @Component("memberService2") 이런식으로 부여 가능
+```java
+@Configuration
+@ComponentScan(
+        excludeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Configuration.class)
+)
+public class AutoAppConfig {
+}
+```
+excludeFilters를 이용해서 기존의 AppConfig와 같은 설정 정보는 컴포넌트 스캔 대상에서 제외(충돌 방지)
+
+이제 각 클래스가 컴포넌트 스캔의 대상이 되도록 @Component 애노테이션을 붙여줌
+
+### 의존관계 주입
+그렇다면 의존관계 주입은?   
+-> @Autowired를 이용한 자동 의존관계 주입 사용
+```java
+@Component
+public class MemberServiceImpl implements MemberService {
+    
+    private final MemberRepository memberRepository;
+    
+    @Autowired
+    public MemberServiceImpl(MemberRepository memberRepository) {
+        this.memberRepository = memberRepository;
+    }
+
+    @Override
+    public void join(Member member) {
+        memberRepository.save(member);
+    }
+
+    @Override
+    public Member findMember(Long id) {
+        return memberRepository.findById(id);
+    }
+}
+```
+생성자에 @Autowired를 지정하면, 스프링 컨테이너가 자동으로 인자로 필요한 스프링 빈을 찾아서 주입   
+getBean(MemberRepository.class)과 같이 타입을 이용한 조회 방식 사용
+
+### 탐색 위치와 기본 스캔 대상
+컴포넌트 스캔 탐색 시작 위치를 지정할 수 있음
+```java
+@ComponentScan(
+        basePackages = "hello.core" // hello.core 내부만 탐색
+//        basePackages = {"hello.core", "hello.service"}  // 여러 위치 지정 가능
+//        basePackageClasses = AutoAppConfig.class // 지정한 클래스의 패키지를 탐색 시작 위치로 지정
+)
+```
+기본값 - @ComponentScan이 붙은 설정 정보 클래스의 패키지가 시작 위치가 됨
+
+@Configuration, @Controller와 같은 어노테이션은 내부적으로 @Component가 붙어있기 때문에 컴포넌트의 기본 스캔 대상
+
+부가 기능   
+- @Controller: 스프링 MVC 컨트롤러로 인식
+- @Repository: 스프링 데이터 접근 계층으로 인식하고, 데이터 계층의 예외를 스프링 예외로 변환해줌
+- @Configuration: 스프링 설정 정보로 인식하고, 스프링 빈이 싱글톤을 유지하도록 추가 처리
+- @Service: 특별한 처리를 하지 않지만, 개발자들이 핵심 비즈니스 로직 위치를 인식하는데 도움이 됨
+
+### 필터
+- includeFilters: 컴포넌트 스캔 대상을 추가로 지정
+- excludeFilters: 컴포넌트 스캔에서 제외할 대상을 지정
+
+```java
+@ComponentScan(
+    includeFilters = @Filter(type = FilterType.ANNOTATION, classes = MyIncludeComponent.class),
+    excludeFilters = @Filter(type = FilterType.ANNOTATION, classes = MyExcludeComponent.class)
+)
+```
+
+Filter Type 옵션   
+- ANNOTATION: 기본값, 애노테이션을 인식해서 동작
+- ASSIGNABLE_TYPE: 지정한 타입과 자식 타입을 인식해서 동작
+- ASPECTJ: AspectJ 패턴 사용
+- REGEX: 정규 표현식
+- CUSTOM: TypeFilter 이라는 인터페이스를 구현해서 처리
+
+### 중복 등록과 충돌
+1. 자동 등록 vs 자동 등록   
+   이름이 같은 경우 발생   
+   -> ConflictingBeanDefinitionException 예외 발생
+   
+2. 자동 등록 vs 수동 등록
+   이 경우 수동 빈 등록이 우선권을 가짐
+   최근 스프링 부트에서는 수동 빈 등록과 자동 빈 등록이 충돌나면 오류가 발생하도록 함
+   (CoreApplication 실행 시 확인 가능)
+   

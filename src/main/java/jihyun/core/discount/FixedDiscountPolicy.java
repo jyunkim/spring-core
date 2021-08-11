@@ -2,7 +2,9 @@ package jihyun.core.discount;
 
 import jihyun.core.member.Grade;
 import jihyun.core.member.Member;
+import org.springframework.stereotype.Component;
 
+@Component
 public class FixedDiscountPolicy implements DiscountPolicy {
 
     private int discountFixAmount = 1000;

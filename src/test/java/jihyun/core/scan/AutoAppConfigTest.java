@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.*;
 public class AutoAppConfigTest {
 
     @Test
-    void basicScna() {
+    void basicScan() {
         ApplicationContext ac = new AnnotationConfigApplicationContext(AutoAppConfig.class);
 
         MemberService memberService = ac.getBean(MemberService.class);

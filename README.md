@@ -527,8 +527,8 @@ Filter Type 옵션
    이름이 같은 경우 발생   
    -> ConflictingBeanDefinitionException 예외 발생
    
-2. 자동 등록 vs 수동 등록
-   이 경우 수동 빈 등록이 우선권을 가짐
+2. 자동 등록 vs 수동 등록   
+   이 경우 수동 빈 등록이 우선권을 가짐   
    최근 스프링 부트에서는 수동 빈 등록과 자동 빈 등록이 충돌나면 오류가 발생하도록 함
    (CoreApplication 실행 시 확인 가능)
 
@@ -756,7 +756,8 @@ public class AllBeanTest {
 }
 ```
 Map<String, DiscountPolicy>    
-map의 키에 스프링 빈의 이름을 넣어주고, 값으로 DiscountPolicy 타입으로 조회한 모든 스프링 빈을 담아준다.   
+map의 키에 스프링 빈의 이름을 넣어주고, 값으로 DiscountPolicy 타입으로 조회한 모든 스프링 빈을 담아준다.
+
 List<DiscountPolicy\>   
 DiscountPolicy 타입으로 조회한 모든 스프링 빈을 담아준다.
 
@@ -796,3 +797,151 @@ public class DiscountPolicyConfig {
    }
 }
 ```
+
+## 8. 빈 생명주기 콜백
+### 객체 생성과 초기화 분리
+생성자는 필수 정보를 받고, 메모리를 할당해서 객체를 생성하는 책임을 가짐   
+반면 초기화는 이렇게 생성된 값들을 활용해서 외부 커넥션을 연결하는등 무거운 동작을 수행   
+-> 생성자 안에서 무거운 초기화 작업을 함께 하는 것 보다는, 
+객체를 생성하는 부분과 초기화 하는 부분을 명확하게 나누는 것이 유지보수 관점에서 좋음
+
+### 객체의 초기화와 종료
+애플리케이션 시작 시점에 필요한 연결을 미리 해두고,
+애플리케이션 종료 시점에 연결을 모두 종료하는 작업이 필요한 경우가 있음   
+Ex. 데이터베이스 커넥션 풀, 네트워크 소켓
+
+스프링 빈은 객체를 생성하고, 의존관계 주입이 다 끝난 다음에야 필요한 데이터를 사용할 수 있는 준비가 완료됨   
+-> 초기화 작업은 의존관계 주입이 모두 완료되고 난 다음에 호출해야 함   
+-> 개발자가 의존관계 주입이 모두 완료된 시점을 알아야 함   
+스프링은 의존관계 주입이 완료되면 스프링 빈에게 콜백 메서드를 통해서 초기화 시점을 알려주는 다양한 기능을 제공   
+또한 스프링 컨테이너가 종료되기 직전에 소멸 콜백을 주므로 안전하게 종료 작업을 진행할 수 있음
+
+**스프링 빈의 이벤트 라이프사이클**   
+스프링 컨테이너 생성 -> 스프링 빈 생성 -> 의존관계 주입 -> 초기화 콜백 -> 사용 -> 소멸전 콜백 -> 스프링 종료
+
+### InitializingBean, DisposableBean
+인터페이스 이용
+```java
+public class NetworkClient implements InitializingBean, DisposableBean {
+
+    private String url;
+
+    public NetworkClient() {
+        System.out.println("생성자 호출, url = " + url);
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
+    }
+
+    // 서비스 시작 시 호출
+    public void connect() {
+        System.out.println("connect: " + url);
+    }
+
+    public void call(String message) {
+        System.out.println("call: " + url + " message = " + message);
+    }
+
+    // 서비스 종료 시 호출
+    public void disconnect() {
+        System.out.println("disconnect: " + url);
+    }
+
+    // 의존관계 주입이 끝나면 실행됨
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        // 초기화
+        connect();
+        call("초기화 연결 메시지");
+    }
+
+    // 빈이 소멸될 때 실행됨
+    @Override
+    public void destroy() throws Exception {
+        // 종료
+        disconnect();
+    }
+}
+```
+**초기화, 소멸 인터페이스 단점**   
+- 이 인터페이스는 스프링 전용 인터페이스이므로,
+해당 코드가 스프링 전용 인터페이스에 의존하게됨
+- 메서드 이름을 변경할 수 없음 
+- 외부 라이브러리에는 적용할 수 없음
+> 인터페이스를 사용하는 초기화, 종료 방법은 스프링 초창기에 나온 방법이고, 
+지금은 다음의 더 나은 방법들이 있어서 거의 사용하지 않는다.
+
+### @Bean 속성 이용
+```java
+public class NetworkClient {
+    
+    ...
+    
+    // 의존관계 주입이 끝나면 실행됨
+    public void init() {
+        // 초기화
+        connect();
+        call("초기화 연결 메시지");
+    }
+
+    // 빈이 소멸될 때 실행됨
+    public void close() {
+        // 종료
+        disconnect();
+    }
+}
+```
+```java
+@Configuration
+class LifeCycleConfig {
+
+     @Bean(initMethod = "init", destroyMethod = "close")
+     public NetworkClient networkClient() {
+         NetworkClient networkClient = new NetworkClient();
+         networkClient.setUrl("http://www.spring.com");
+         return networkClient;
+     }
+ }
+```
+- 메서드 이름을 자유롭게 줄 수 있음
+- 스프링 빈이 스프링 코드에 의존하지 않음
+- 코드가 아니라 설정 정보를 사용하기 때문에 코드를 고칠 수 없는 
+외부 라이브러리에도 초기화, 종료 메서드를 적용할 수 있음
+
+\* 종료 메서드 추론   
+@Bean의 destroyMethod 속성에는 아주 특별한 기능이 있다.   
+라이브러리는 대부분 close, shutdown이라는 이름의 종료 메서드를 사용하는데,
+종료 메서드의 추론 기능은 close, shutdown라는 이름의 메서드를 자동으로 호출해준다.   
+따라서 직접 스프링 빈으로 등록하면 종료 메서드는 따로 적어주지 않아도 동작한다.
+
+### @PostConstruct, @PreDestory
+```java
+public class NetworkClient {
+
+    ...
+    
+    // 의존관계 주입이 끝나면 실행됨
+    @PostConstruct
+    public void init() {
+        // 초기화
+        connect();
+        call("초기화 연결 메시지");
+    }
+    
+    // 빈이 소멸될 때 실행됨
+    @PreDestroy
+    public void close() {
+        // 종료
+        disconnect();
+    }
+}
+```
+- 최신 스프링에서 가장 권장하는 방법
+- 스프링에 종속적인 기술이 아니라 JSR-250라는 자바 표준 기술이기 때문에
+  스프링이 아닌 다른 컨테이너에서도 동작한다.
+- 외부 라이브러리에는 적용하지 못하기 때문에 외부 라이브러리를 초기화, 종료해야 하면
+@Bean의 기능을 사용하자.
+  
+외부 라이브러리를 사용할 땐 @Bean의 속성을 사용하고, 
+그 외에는 어노테이션을 사용하자

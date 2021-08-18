@@ -945,3 +945,272 @@ public class NetworkClient {
   
 외부 라이브러리를 사용할 땐 @Bean의 속성을 사용하고, 
 그 외에는 어노테이션을 사용하자
+
+## 9. 빈 스코프
+### 빈 스코프
+빈이 존재할 수 있는 범위
+
+- 싱글톤: 기본 스코프, 스프링 컨테이너의 시작과 종료까지 유지되는 가장 넓은 범위의 스코프
+- 프로토타입: 빈의 생성과 의존관계 주입까지만 관리되는 매우 짧은 범위의 스코프
+- 웹 관련 스코프
+   - request: 웹 요청이 들어오고 나갈 때까지 유지되는 스코프
+   - session: 웹 세션이 생성되고 종료될 때까지 유지되는 스코프
+   - application: 웹의 서블릿 컨텍스와 같은 범위로 유지되는 스코프
+   
+### 프로토타입 스코프
+싱글톤과 달리 프로토타입 스코프를 스프링 컨테이너에 조회하면 스프링 컨테이너는 항상 새로운 인스턴스를 생성해서 반환   
+스프링 컨테이너는 프로토타입 빈 생성, 의존관계 주입, 초기화까지만 처리   
+이후 프로토타입 빈을 관리할 책임은 프로토타입 빈을 받은 클라이언트에 있음
+
+```java
+public class PrototypeTest {
+
+    @Test
+    void prototypeBeanFind() {
+       // 인자로 넘겨준 클래스는 @Component가 없어도 컴포넌트 스캔의 대상이 됨
+        AnnotationConfigApplicationContext ac = new AnnotationConfigApplicationContext(PrototypeBean.class);
+        System.out.println("Get prototypeBean1");
+        PrototypeBean prototypeBean1 = ac.getBean(PrototypeBean.class);
+        System.out.println("Get prototypeBean2");
+        PrototypeBean prototypeBean2 = ac.getBean(PrototypeBean.class);
+        System.out.println("prototypeBean1 = " + prototypeBean1);
+        System.out.println("prototypeBean2 = " + prototypeBean2);
+
+        assertThat(prototypeBean1).isNotSameAs(prototypeBean2);
+
+        ac.close();
+    }
+
+    @Scope("prototype")
+    static class PrototypeBean {
+
+        @PostConstruct
+        public void init() {
+            System.out.println("PrototypeBean.init");
+        }
+
+        @PreDestroy
+        public void close() {
+            System.out.println("PrototypeBean.close");
+        }
+    }
+}
+```
+
+실행 결과
+```
+find prototypeBean1
+PrototypeBean.init
+find prototypeBean2
+PrototypeBean.init
+prototypeBean1 = hello.core.scope.PrototypeTest$PrototypeBean@13d4992d
+prototypeBean2 = hello.core.scope.PrototypeTest$PrototypeBean@302f7971
+org.springframework.context.annotation.AnnotationConfigApplicationContext - Closing
+```
+
+싱글톤 빈은 스프링 컨테이너 생성 시점에 초기화 메서드가 실행 되지만, 
+프로토타입 스코프의 빈은 스프링 컨테이너에서 빈을 조회할 때 생성되고, 초기화 메서드도 실행됨   
+또, 프로토타입 빈을 조회할 때마다 완전히 다른 스프링 빈이 생성됨   
+싱글톤 빈은 스프링 컨테이너가 관리하기 때문에 스프링 컨테이너가 종료될 때 빈의 종료 메서드가 실행되지만, 
+프로토타입 빈은 스프링 컨테이너가 생성과 의존관계 주입 그리고 초기화 까지만 관여하고, 
+더는 관리하지 않기 때문에 스프링 컨테이너가 종료될 때 종료 메서드가 실행되지 않음   
+-> 클라이언트가 직접 종료 메서드를 호출해야 함
+
+그러면 프로토타입 빈을 언제 사용할까?   
+-> 매번 사용할 때마다 의존관계 주입이 완료된 새로운 객체가 필요한 경우
+
+### 싱글톤 빈 내 프로토타입 빈
+싱글톤 빈에서 프로토타입 빈을 주입 받아 사용하는 경우   
+요청이 올 때마다 프로토타입 빈을 새로 생성해서 사용하길 원함      
+싱글톤 빈 내 프로토타입 빈은 의존관계 주입 시점에 생성됨   
+But, 의존관계 주입은 싱글톤 빈이 처음 생성될 때 한번만 일어나므로 프로토타입 빈 또한 한번만 생성된다.
+
+싱글톤 빈과 프로토타입 빈을 함께 사용할 때, 어떻게 하면 사용할 때 마다 항상 새로운 프로토타입 빈을 생성할 수 있을까?
+
+\* Dependency Lookup(DL), 의존관계 조회(탐색): 의존관계를 외부에서 주입(DI) 받는게 아니라 이렇게 직접 필요한 의존관계를 찾는 것
+```java
+static class ClientBean {
+
+   @Autowired
+   private ApplicationContext ac;
+   
+   public int logic() {
+      PrototypeBean prototypeBean = ac.getBean(PrototypeBean.class);
+      prototypeBean.addCount();
+      int count = prototypeBean.getCount();
+      return count;
+   }
+}
+```
+그런데 이렇게 스프링의 애플리케이션 컨텍스트 전체를 주입받게 되면, 스프링 컨테이너에 종속적인 코드가 되고, 단위 테스트도 어려워짐   
+-> Provider 이용
+
+**ObjectProvider**   
+스프링에서 지정한 빈을 컨테이너에서 대신 찾아주는 DL 서비스를 제공하는 것
+```java
+static class ClientBean {
+
+   @Autowired
+   private ObjectProvider<PrototypeBean> prototypeBeanProvider;
+   
+   public int logic() {
+      PrototypeBean prototypeBean = prototypeBeanProvider.getObject();
+      prototypeBean.addCount();
+      return prototypeBean.getCount();
+   }
+}
+```
+getObject()를 호출하면 내부에서는 스프링 컨테이너를 통해 해당 빈을 찾아서 반환(DL)   
+-> 항상 새로운 프로토타입 빈이 생성됨   
+Provider는 컨테이너 생성 시 주입됨   
+기능이 단순하므로 단위테스트를 만들거나 mock 코드를 만들기 훨씬 쉬워짐
+
+**JSR-330 Provider**   
+자바 표준 provider
+
+javax.inject:javax.inject:1 라이브러리를 gradle에 추가해야함
+```java
+static class ClientBean {
+
+   @Autowired
+   private Provider<PrototypeBean> prototypeBeanProvider;
+   
+   public int logic() {
+      PrototypeBean prototypeBean = prototypeBeanProvider.get();
+      prototypeBean.addCount();
+      return prototypeBean.getCount();
+   }
+}
+```
+자바 표준이므로 스프링이 아닌 다른 컨테이너에서도 사용할 수 있음
+
+ObjectProvider는 DL을 위한 편의 기능을 많이 제공해주고 스프링 외에 별도의 의존관계 추가가 필요 없기 때문에, 
+스프링이 아닌 다른 컨테이너를 사용하지 않는다면 ObjectProvider를 사용
+
+### 웹 스코프
+웹 스코프는 웹 환경에서만 동작(spring-boot-starter-web 라이브러리 추가)   
+-> hello.core.CoreApplication의 main 메서드를 실행하면 웹 애플리케이션이 실행됨
+(@SpringBootApplication에 @ComponentScan이 포함되어 있음)   
+-> 스프링 부트가 내장 톰켓 서버를 활용해서 웹 서버와 스프링을 함께 실행시킴
+> 스프링 부트는 웹 라이브러리가 없으면 AnnotationConfigApplicationContext를 기반으로 애플리케이션을 구동한다.    
+웹 라이브러리가 추가되면 웹과 관련된 추가 설정과 환경들이 필요하므로 AnnotationConfigServletWebServerApplicationContext를 
+기반으로 애플리케이션을 구동한다.
+
+프로토타입과 다르게 스프링이 해당 스코프의 종료시점까지 관리   
+-> 종료 메서드가 호출됨
+
+**request 스코프**   
+HTTP 요청 하나가 들어오고 응답으로 나갈 때까지 유지되는 스코프, 각각의 HTTP 요청마다 별도의 빈 인스턴스가 생성되고 관리됨
+
+![image](https://user-images.githubusercontent.com/68456385/129887250-5b125d4a-3f0c-4bf3-9d3a-f64e5e6f7471.png)
+
+```java
+@Component
+@Scope("request")
+public class MyLogger {
+
+    private String uuid;
+    private String requestURL;
+
+    public void setRequestURL(String requestURL) {
+        this.requestURL = requestURL;
+    }
+
+    public void log(String message) {
+        System.out.println("[" + uuid + "]" + "[" + requestURL + "] " + message);
+    }
+
+    @PostConstruct
+    public void init() {
+        // 임의의 랜덤 id 부여
+        uuid = UUID.randomUUID().toString();
+        System.out.println("[" + uuid + "] request scope bean created: " + this);
+    }
+
+    @PreDestroy
+    public void destroy() {
+        System.out.println("[" + uuid + "] request scope bean destroyed: " + this);
+    }
+}
+```
+request scope를 사용하지 않고 파라미터로 모든 정보를 서비스 계층에 넘긴다면, 파라미터가 많아서 지저분해짐   
+또한 requestURL 같은 웹과 관련된 정보가 웹과 관련없는 서비스 계층까지 넘어가게 됨(웹과 관련된 부분은 컨트롤러까지만 사용해야 함)      
+서비스 계층은 웹 기술에 종속되지 않고, 가급적 순수하게 유지하는 것이 유지보수 관점에서 좋음   
+```java
+@Controller
+@RequiredArgsConstructor
+public class LogDemoController {
+
+    private final LogDemoService logDemoService;
+    private final MyLogger myLogger;
+
+    @RequestMapping("log-demo")
+    @ResponseBody
+    // 자바 표준 서블릿 규약에 맞는 요청
+    public String logDemo(HttpServletRequest request) {
+        String requestURL = request.getRequestURL().toString();
+        myLogger.setRequestURL(requestURL);
+
+        myLogger.log("Controller test");
+        logDemoService.logic("testId");
+        return "OK";
+    }
+}
+```
+-> 실행해보면 LogDemoController에서 의존관계 주입 시 MyLogger 빈을 찾을 수 없다는 에러 발생   
+-> request 스코프 빈은 HTTP 요청이 들어온 이후에 생성될 수 있기 때문에 스프링 컨테이너가 생성되는 시점에는 생성되지 않는다!   
+-> Provider 이용
+
+### ObjectProvider
+```java
+@Controller
+@RequiredArgsConstructor
+public class LogDemoController {
+
+    private final LogDemoService logDemoService;
+    private final ObjectProvider<MyLogger> myLoggerProvider;
+
+    @RequestMapping("log-demo")
+    @ResponseBody
+    // 자바 표준 서블릿 규약에 맞는 요청
+    public String logDemo(HttpServletRequest request) {
+        String requestURL = request.getRequestURL().toString();
+        MyLogger myLogger = myLoggerProvider.getObject();
+        myLogger.setRequestURL(requestURL);
+
+        myLogger.log("Controller test");
+        logDemoService.logic("testId");
+        return "OK";
+    }
+}
+```
+getObject()를 호출하시는 시점에는 HTTP 요청이 진행중이므로 request scope 빈의 생성이 정상 처리됨   
+요청마다 별개의 스프링 빈 반환, 같은 HTTP 요청이면 같은 스프링 빈이 반환   
+=> getObject()를 호출하는 시점까지 request scope 빈의 생성을 지연시켜 처리
+
+### 프록시
+```java
+@Component
+@Scope(value = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class MyLogger {
+}
+```
+적용 대상이 클래스 - TARGET_CLASS   
+적용 대상이 인터페이스 - INTERFACES
+
+LogDemoController, LogDemoService는 Provider 사용 전과 동일
+
+스프링 컨테이너가 CGLIB라는 바이트코드를 조작하는 라이브러리를 사용해서 MyLogger를 상속받은 가짜 프록시 객체를 생성한 후 주입
+
+![image](https://user-images.githubusercontent.com/68456385/129887948-b2da3d9b-06f9-4968-8606-6f11baddf72c.png)
+가짜 프록시 객체에는 요청이 오면 그때 내부에서 진짜 빈을 요청하는 위임 로직이 들어있고, 싱글톤으로 동작    
+가짜 프록시 객체의 메서드 호출 -> 진짜 request 스코프의 메서드 호출   
+가짜 프록시 객체는 원본 클래스를 상속 받아서 만들어졌기 때문에 이 객체를 사용하는 클라이언트 입장에서는 
+원본인지 아닌지도 모르게, 동일하게 사용할 수 있음(다형성)
+
+클라이언트는 마치 싱글톤 빈을 사용하듯이 편리하게 request scope를 사용할 수 있음   
+진짜 객체 조회를 꼭 필요한 시점까지 지연 처리      
+어노테이션만 추가하면 클라이언트 코드를 수정하지 않아도 된다!
+
+마치 싱글톤을 사용하는 것 같지만 다르게 동작하기 때문에 결국 주의해서 사용해야함   
+특별한 scope는 무분별하게 사용하면 유지보수하기 어려워지므로 꼭 필요한 곳에만 최소화해서 사용
